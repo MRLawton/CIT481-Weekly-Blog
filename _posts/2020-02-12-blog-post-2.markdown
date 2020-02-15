@@ -1,0 +1,158 @@
+---
+layout: post
+title:  "Blog Post 2"
+date:   2020-02-12 0:10:25 -0800
+categories: jekyll blog
+---
+For the third week of class, I focused on completing the first lab assignment. The s3 bucket is where I started concentrating my efforts since it seems to act as an overarching storage container that contains the other online resources stored in the Amazon Web Services (AWS) console. This objective was accomplished by utilizing the segment of Terraform code listed below: 
+# AWS services and infrastructure 
+provider "aws" { 
+	region = "us-west-2"
+}
+
+# S3 bucket storage container 
+resource "aws_s3_bucket" "tf-remote-state" {
+  bucket = "cit481lab1s3bucket"
+
+  versioning {
+    enabled = true
+  }
+
+  lifecycle {
+    prevent_destroy = false
+  }
+}
+
+# State Lock for the S3 Bucket 
+resource "aws_dynamodb_table" "dynamodb-tf-state-lock" {
+  name            = "tf-state-lock" 
+  hash_key        = "LockID"
+  read_capacity   = 20
+  write_capacity = 20
+
+  attribute {
+    name = "LockID"
+    type = "S"
+  }
+}. 
+I used the aformentioned code in its own script to create the necessary cloud infrastructure related to the container because the resources included in this project have to be created in sequential order. The next part I focused on was the IAM role that supposedly allows users or services to access certain resources. It determines who can access the specified resources based on the set permission policy. A user with the proper login credentials to run the "$aws configure" command will assume the IAM role temporarily and its associated permissions listed in the lab1.tf file located in another branching subdirectory within the same parent folder called lab1. In this folder, I created two subdirectories titled main and s3 to hold all the necessay data for the digital Terraform environment. I then constructed an EC2 instance otherwise known as a web server in AWS and connected it to the previous two resources. An Ubuntu Linux image was utilized as the operating system for this instance and was further developed by attaching an EBS volume to the web server and giving it a ext4 filesystem. The resulting code I used to achieve these tasks is displayed below: 
+# Specify AWS services and infrastructure. 
+provider "aws" { 
+	region = "us-west-2"
+}
+
+# Required function call for backend of the s3 bucket called cit481groupbucket stored in s3.tf.
+terraform {
+    backend  "s3" {
+    region         = "us-west-2"
+    bucket         = "cit481lab1s3bucket"
+    # The key can be specified by different users, but it must remain the same for consistency
+    key            = "remotesession" 
+    dynamodb_table = "tf-state-lock"
+    }
+} 
+ 
+
+resource "aws_iam_role" "s3_iam_role" {
+  name               = "s3-iam-role"
+  assume_role_policy = <<EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Action": "sts:AssumeRole",
+      "Principal": {
+        "Service": "ec2.amazonaws.com"
+      },
+      "Effect": "Allow",
+      "Sid": ""
+    }
+  ]
+}
+EOF
+}
+
+resource "aws_iam_instance_profile" "s3_instance_profile" {
+  name = "s3-trax-instance-profile"
+  role = "${aws_iam_role.s3_iam_role.name}"
+}
+
+# IAM role policy enables S3 bucket access from an EC2 instance.
+resource "aws_iam_role_policy" "s3_iam_role_policy" {
+  name = "s3_iam_role_policy"
+  role = "${aws_iam_role.s3_iam_role.id}"
+  policy = <<EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": ["s3:ListBucket", "s3:ListAllMyBuckets"],
+      "Resource": ["arn:aws:s3:::test-bucket-example"]
+    },
+    {
+      "Effect": "Allow",
+      "Action": ["s3:ListAllMyBuckets"],
+      "Resource": ["arn:aws:s3:::*"]
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "s3:PutObject",
+        "s3:GetObject",
+        "s3:DeleteObject"
+      ],
+      "Resource": ["arn:aws:s3:::test-bucket-example/*"]
+    }
+  ]
+}
+EOF
+}
+
+
+# Creates the EC2 instance (web server) with the attached IAM role policy. 
+resource "aws_instance" "ec2_instance" {
+  ami           = "ami-06d51e91cea0dac8d"
+  instance_type = "t2.micro"
+  disable_api_termination = false
+
+  iam_instance_profile = "${aws_iam_instance_profile.s3_instance_profile.id}"
+
+  root_block_device {
+    delete_on_termination = true
+  }
+      
+  tags = {
+	     Name = "webserver"
+  }
+
+  lifecycle {
+    # Once created, ignore future changes to the ami and user_data
+    ignore_changes = [
+      ami,
+      user_data,
+    ]
+    prevent_destroy = false
+  }
+}
+
+
+resource "aws_ebs_volume" "ebs_volume" {
+  availability_zone = "us-west-2a"
+  # The size attribute field is set to 8 GiB for the Elastic Block Storage. 
+  size              = 8
+
+  tags = {
+    Name = "HelloWorld"
+  }
+}
+
+data "ignition_filesystem" "foo" {
+    name = "root"
+    mount {
+        device = "/dev/disk/by-label/ROOT"
+        format = "ext4"
+        options = ["-L", "ROOT"]
+    }
+}. 
+At this point, I am having difficulty with step 4b of the lab assignment since I cannot seem to use the SSH protocol to login as a user within the EC2 instance. I have tried gaining entrance to my web server by trying a number of different commands. So far, none of these commands have worked properly, and the only output I am receiving are error messages regarding the key pair I generated in the AWS console and something about port 22. It is strange because I have followed the online guides closely, but I still do not have access to my instance through the terminal window even though the infrastructure currently exists and appear to be configured appropriately. The general format of the command from the online guides seem to be ssh command specified with the -i option and the location of the key with the .pem file extension as well as the IPv4 address of the EC2 instance. Right now, I am planning to ask the professor for assistance regarding this issue. 
